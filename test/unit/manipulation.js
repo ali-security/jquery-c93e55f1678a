@@ -2525,6 +2525,45 @@ QUnit.test( "jQuery.htmlPrefilter (gh-1747)", function( assert ) {
 	}, 100 );
 } );
 
+QUnit.test( "<option> HTML is not wrapped in a <select> element (gh-4647)", function( assert ) {
+
+	assert.expect( 4 );
+
+	// Content following a stray </select> must not escape the context in which
+	// the markup was written (e.g. a raw text element seen by a sanitizer).
+	var html = "<option>a</option></select><b>b</b>",
+		expected = document.createElement( "div" ),
+		parsed;
+
+	// Support: IE <=9 only
+	// IE <=9 still needs the <select> wrapper to create <option> elements.
+	expected.innerHTML = "<option></option>";
+	if ( !expected.lastChild ) {
+		assert.ok( true, "IE <=9 requires the <select> wrapper" );
+		assert.ok( true, "IE <=9 requires the <select> wrapper" );
+		assert.ok( true, "IE <=9 requires the <select> wrapper" );
+		assert.ok( true, "IE <=9 requires the <select> wrapper" );
+		return;
+	}
+
+	expected.innerHTML = html;
+	expected = expected.innerHTML.toLowerCase();
+
+	parsed = jQuery.parseHTML( html );
+	assert.deepEqual( jQuery.map( parsed, function( node ) {
+		return node.nodeName.toLowerCase();
+	} ), [ "option", "b" ], "jQuery.parseHTML parses <option> markup in place" );
+
+	assert.equal( jQuery( "<div></div>" ).html( html ).html().toLowerCase(), expected,
+		".html() parses <option> markup like the browser does" );
+
+	assert.equal( jQuery( "<div></div>" ).append( html ).html().toLowerCase(), expected,
+		".append() parses <option> markup like the browser does" );
+
+	assert.equal( jQuery( "<div></div>" ).html( "<option><style></option></select><b>b</b></style>" )
+		.find( "b" ).length, 0, "Markup inside a raw text element stays inert" );
+} );
+
 QUnit.test( "insertAfter, insertBefore, etc do not work when destination is original element. Element is removed (#4087)", function( assert ) {
 
 	assert.expect( 10 );
