@@ -1,0 +1,128 @@
+name: seal-build
+
+# Build-and-pack only: the tests run on Travis (.travis.yml).
+on:
+  workflow_dispatch:
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The published tarball was packed with Node 5.2.0 / npm 3.3.12.
+      - name: Set up Node 5.2.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "5.2.0"
+
+      - name: Toolchain versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+
+      - name: Install dependencies (time-machine registry)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm config set registry https://:2016-01-08T19%3A58%3A05.265Z@time-machines-npm.sealsecurity.io/
+          # left-pad@0.0.3 (babel-core 5 -> line-numbers, via grunt-babel and jscs) was
+          # re-published 2016-03-22, after the time-machine date, so the time
+          # machine can't serve it: install it from the live registry first.
+          npm install https://registry.npmjs.org/left-pad/-/left-pad-0.0.3.tgz
+          npm install
+
+      # build/tasks/build.js stamps @DATE with the current time; pin it to the
+      # release build date (done here, not as a source edit).
+      - name: Pin build date
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e '
+          var fs = require("fs");
+          var file = "build/tasks/build.js";
+          var from = "( new Date() ).toISOString().replace( /:\\d+\\.\\d+Z$/, \"Z\" )";
+          var src = fs.readFileSync(file, "utf8");
+          if (src.split(from).length !== 2) {
+            console.error("expected exactly one @DATE expression in " + file);
+            process.exit(1);
+          }
+          fs.writeFileSync(file, src.split(from).join("\"2016-01-08T19:56Z\""));
+          '
+          if grep -nF '( new Date() ).toISOString()' build/tasks/build.js; then
+            echo "build date expression still present in build/tasks/build.js"
+            exit 1
+          fi
+          grep -nF '.replace( /@DATE/g, "2016-01-08T19:56Z" )' build/tasks/build.js
+
+      - name: Build dist (grunt default)
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset COMMIT
+          ./node_modules/.bin/grunt
+          grep -nF ' * Date: 2016-01-08T19:56Z' dist/jquery.js
+          ls -la dist
+          sha256sum dist/jquery.js dist/jquery.min.js dist/jquery.min.map
+
+      # Mirrors build/release/dist.js: the release clones jquery-dist (master
+      # at release time = "Release 3.0.0-alpha1", the parent of its 1.12.0
+      # tag), copies the dist files plus src/LICENSE/AUTHORS/package.json in,
+      # and writes bower.json; npm publishes from that tree.
+      - name: Assemble jquery-dist tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIST_REPO="$RUNNER_TEMP/jquery-dist"
+          git clone https://github.com/jquery/jquery-dist.git "$DIST_REPO"
+          git -C "$DIST_REPO" checkout "1.12.0^"
+          subject="$(git -C "$DIST_REPO" log -1 --format=%s)"
+          echo "jquery-dist base: $(git -C "$DIST_REPO" rev-parse HEAD) $subject"
+          if [ "$subject" != "Release 3.0.0-alpha1" ]; then
+            echo "unexpected jquery-dist base commit: $subject"
+            exit 1
+          fi
+          mkdir -p "$DIST_REPO/dist"
+          cp -f dist/jquery.js dist/jquery.min.js dist/jquery.min.map "$DIST_REPO/dist/"
+          # cp -rf onto the existing src/ merges (matches the published tarball)
+          cp -rf src LICENSE.txt AUTHORS.txt package.json "$DIST_REPO/"
+          # bower.json exactly as generateBower() writes it (no trailing newline)
+          (cd "$DIST_REPO" && node -e '
+          var fs = require("fs");
+          var pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          fs.writeFileSync("bower.json", JSON.stringify({
+            name: pkg.name,
+            main: pkg.main,
+            license: "MIT",
+            ignore: [ "package.json" ],
+            keywords: pkg.keywords
+          }, null, 2));
+          ')
+          cat "$DIST_REPO/bower.json"
+          echo
+          rm -rf "$DIST_REPO/.git"
+
+      - name: Pack (npm from Node 5.2.0)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/jquery-dist"
+          node --version
+          npm --version
+          npm pack
+          tar tzvf jquery-1.12.0.tgz
+          echo "member count: $(tar tzf jquery-1.12.0.tgz | wc -l)"
+          mkdir -p "$RUNNER_TEMP/out"
+          mv jquery-1.12.0.tgz "$RUNNER_TEMP/out/"
+          sha256sum "$RUNNER_TEMP/out/jquery-1.12.0.tgz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jquery-1.12.0
+          path: ${{ runner.temp }}/out/jquery-1.12.0.tgz
+          if-no-files-found: error

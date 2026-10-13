@@ -1,6 +1,124 @@
 language: node_js
-sudo: false
-node_js:
-- "0.12"
-- "4"
-- "5"
+os: linux
+# Older Travis dists no longer provision; Node 0.12/4/5 install fine via nvm.
+dist: focal
+# The default node_js npm cache restores node_modules from an earlier build,
+# and its npm@2.1.12 devDependency then shadows the system npm through
+# node_modules/.bin (crashes on Node 20, breaks node-gyp on Node 0.12).
+cache: false
+
+# Every job is listed explicitly (no top-level node_js list): the three
+# upstream legs run `npm test` (= grunt build + lint + node smoke tests), and
+# a fourth leg runs the real browser QUnit suite in headless Chrome.
+jobs:
+  include:
+    - name: "node 0.12 - npm test (smoke tests via jsdom@3)"
+      node_js: "0.12"
+      addons:
+        apt:
+          packages:
+            - python2
+      before_install:
+        - npm config set registry https://:2016-01-08T19%3A58%3A05.265Z@time-machines-npm.sealsecurity.io/
+        # jsdom@3 pulls in contextify (native): build it against the local
+        # Node 0.12 headers with python 2.
+        - npm config set python /usr/bin/python2.7
+        - npm config set nodedir "$(dirname "$(dirname "$(which node)")")"
+        - node --version
+        - npm --version
+      install:
+        # left-pad@0.0.3 (babel-core 5 -> line-numbers, via grunt-babel and jscs) was
+        # re-published 2016-03-22, after the time-machine date, so the time
+        # machine can't serve it: install it from the live registry first.
+        - npm install https://registry.npmjs.org/left-pad/-/left-pad-0.0.3.tgz
+        - npm install
+        # Upstream's `grunt old_jsdom` remedy (gh-2519): without it,
+        # test_fast silently runs nothing on Node 0.x.
+        - npm install jsdom@3
+        - node -e 'require("jsdom"); console.log("jsdom loads")'
+      script:
+        - npm test
+
+    - name: "node 4 - npm test"
+      node_js: "4"
+      before_install:
+        - npm config set registry https://:2016-01-08T19%3A58%3A05.265Z@time-machines-npm.sealsecurity.io/
+        - node --version
+        - npm --version
+      install:
+        # left-pad@0.0.3 (babel-core 5 -> line-numbers, via grunt-babel and jscs) was
+        # re-published 2016-03-22, after the time-machine date, so the time
+        # machine can't serve it: install it from the live registry first.
+        - npm install https://registry.npmjs.org/left-pad/-/left-pad-0.0.3.tgz
+        - npm install
+      script:
+        - npm test
+
+    - name: "node 5 - npm test"
+      node_js: "5"
+      before_install:
+        - npm config set registry https://:2016-01-08T19%3A58%3A05.265Z@time-machines-npm.sealsecurity.io/
+        - node --version
+        - npm --version
+      install:
+        # left-pad@0.0.3 (babel-core 5 -> line-numbers, via grunt-babel and jscs) was
+        # re-published 2016-03-22, after the time-machine date, so the time
+        # machine can't serve it: install it from the live registry first.
+        - npm install https://registry.npmjs.org/left-pad/-/left-pad-0.0.3.tgz
+        - npm install
+      script:
+        - npm test
+
+    - name: "browser QUnit suite - headless Chrome + PHP fixtures"
+      node_js: "20"
+      addons:
+        chrome: stable
+        apt:
+          packages:
+            - php-cli
+      before_install:
+        - npm config set registry https://:2016-01-08T19%3A58%3A05.265Z@time-machines-npm.sealsecurity.io/
+      install:
+        # Build dist/ with the release toolchain (Node 5).
+        - nvm install 5
+        - nvm use 5
+        - node --version
+        - npm --version
+        # left-pad@0.0.3 (babel-core 5 -> line-numbers, via grunt-babel and jscs) was
+        # re-published 2016-03-22, after the time-machine date, so the time
+        # machine can't serve it: install it from the live registry first.
+        - npm install https://registry.npmjs.org/left-pad/-/left-pad-0.0.3.tgz
+        - npm install
+        - ./node_modules/.bin/grunt
+        - ls -la dist
+        - nvm use 20
+        # Test driver lives outside the tree, from the live registry (the
+        # time-machine registry above is in the user npmrc, so bypass it).
+        - mkdir -p /tmp/driver
+        - touch /tmp/driver/empty-npmrc
+        - (cd /tmp/driver && NPM_CONFIG_USERCONFIG=/tmp/driver/empty-npmrc npm init -y)
+        - (cd /tmp/driver && NPM_CONFIG_USERCONFIG=/tmp/driver/empty-npmrc npm install --registry=https://registry.npmjs.org/ puppeteer-core@22)
+      before_script:
+        - export CHROME_PATH="$(which google-chrome)"
+        - '"$CHROME_PATH" --version'
+        - /usr/bin/php --version
+        # Multiple workers are load-bearing: a single-process php -S starves
+        # the fixture iframes the suite opens.
+        - (PHP_CLI_SERVER_WORKERS=10 /usr/bin/php -S 127.0.0.1:8000 -t . > /tmp/php.log 2>&1 &)
+        - for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8000/test/index.html && break; sleep 1; done
+        - curl -sf -o /dev/null http://127.0.0.1:8000/test/index.html
+      script:
+        # Skips (modern headless Chrome / full-run order artifacts, not jQuery bugs):
+        # - ajax #14379: sync XHR in an unload handler is forbidden by Chrome.
+        # - offset fractions: Blink snaps offsets to 1/64 px.
+        # - css widows & orphans: Chrome's default for both is now "2".
+        # - traversing closest() positional: basic.js "offset" leaks a div
+        #   into <body> in a full run, changing what "body div:last" matches.
+        # - offset "absolute" [1] (the 4-assertion one; the 178-assertion test
+        #   of the same name still runs): position() of an iframe element via
+        #   the top-window jQuery subtracts the top window's 1px scroll, which
+        #   the offset module setup leaves in place in a full run.
+        - >-
+          SEAL_SKIP_TESTS='ajax: #14379 - jQuery.ajax() on unload|offset: fractions (see #7730 and #7885)|css: widows & orphans #8936|traversing: closest() with positional selectors|offset: absolute [1]'
+          NODE_PATH=/tmp/driver/node_modules
+          node test/seal-browser-runner.js "http://127.0.0.1:8000/test/index.html?dev"
