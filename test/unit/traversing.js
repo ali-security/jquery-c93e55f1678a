@@ -433,7 +433,7 @@ QUnit.test( "has(Element)", function( assert ) {
 	obj = jQuery( "#qunit-fixture" ).has( jQuery( "#sndp" )[ 0 ] );
 	assert.deepEqual( obj.get(), q( "qunit-fixture" ), "Keeps elements that have the element as a descendant" );
 
-	detached = jQuery( "<a><b><i/></b></a>" );
+	detached = jQuery( "<a><b><i></i></b></a>" );
 	assert.deepEqual( detached.has( detached.find( "i" )[ 0 ] ).get(), detached.get(), "...Even when detached" );
 
 	multipleParent = jQuery( "#qunit-fixture, #header" ).has( jQuery( "#sndp" )[ 0 ] );
@@ -448,7 +448,7 @@ QUnit.test( "has(Selector)", function( assert ) {
 	obj = jQuery( "#qunit-fixture" ).has( "#sndp" );
 	assert.deepEqual( obj.get(), q( "qunit-fixture" ), "Keeps elements that have any element matching the selector as a descendant" );
 
-	detached = jQuery( "<a><b><i/></b></a>" );
+	detached = jQuery( "<a><b><i></i></b></a>" );
 	assert.deepEqual( detached.has( "i" ).get(), detached.get(), "...Even when detached" );
 
 	multipleParent = jQuery( "#qunit-fixture, #header" ).has( "#sndp" );
@@ -469,7 +469,7 @@ QUnit.test( "has(Arrayish)", function( assert ) {
 	simple = jQuery( "#qunit-fixture" ).has( jQuery( "#sndp" ) );
 	assert.deepEqual( simple.get(), q( "qunit-fixture" ), "Keeps elements that have any element in the jQuery list as a descendant" );
 
-	detached = jQuery( "<a><b><i/></b></a>" );
+	detached = jQuery( "<a><b><i></i></b></a>" );
 	assert.deepEqual( detached.has( detached.find( "i" ) ).get(), detached.get(), "...Even when detached" );
 
 	multipleParent = jQuery( "#qunit-fixture, #header" ).has( jQuery( "#sndp" ) );
